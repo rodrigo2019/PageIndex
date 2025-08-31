@@ -111,8 +111,18 @@ pip3 install --upgrade -r requirements.txt
 Create a `.env` file in the root directory and add your API key:
 
 ```bash
-CHATGPT_API_KEY=your_openai_key_here
+OPENAI_API_KEY=your_openai_key_here
 ```
+
+Legacy: `CHATGPT_API_KEY` is still recognized for compatibility, but we recommend migrating to `OPENAI_API_KEY`.
+
+Optional configuration (azure support):
+
+- Custom base URL:
+  - `OPENAI_BASE_URL=https://your_endpoint.openai.azure.com/openai/v1`
+- Default query parameters (JSON string or query string):
+  - `OPENAI_DEFAULT_QUERY='{"api-version":"preview"}'`
+  - or `OPENAI_DEFAULT_QUERY=api-version=preview`
 
 ### 3. Run PageIndex on your PDF
 
