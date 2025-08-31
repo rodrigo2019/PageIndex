@@ -1,23 +1,80 @@
-import tiktoken
-import openai
-import logging
 import os
-from datetime import datetime
 import time
 import json
-import PyPDF2
 import copy
 import asyncio
-import pymupdf
-from io import BytesIO
-from dotenv import load_dotenv
-load_dotenv()
 import logging
+import re
+from datetime import datetime
+from io import BytesIO
+
+import tiktoken
+import openai
+import PyPDF2
+import pymupdf
 import yaml
+from dotenv import load_dotenv
 from pathlib import Path
 from types import SimpleNamespace as config
 
-CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY")
+load_dotenv()
+
+# API keys and endpoint configuration (unified)
+CHATGPT_API_KEY = os.getenv("CHATGPT_API_KEY") or os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")  # e.g., https://endpoint/openai/v1
+OPENAI_DEFAULT_QUERY = os.getenv("OPENAI_DEFAULT_QUERY")  # e.g., {"api-version":"preview"} or api-version=preview
+
+
+def _parse_default_query(env_value):
+    """Parse OPENAI_DEFAULT_QUERY from JSON or simple k=v list.
+
+    Supports formats:
+    - JSON string: '{"api-version":"preview"}'
+    - Query string: 'api-version=preview&foo=bar' or 'api-version=preview,foo=bar'
+    """
+    if not env_value:
+        return None
+    try:
+        return json.loads(env_value)
+    except Exception:
+        tokens = []
+        s = env_value.strip()
+        if "&" in s:
+            tokens = [p.strip() for p in s.split("&")]
+        elif "," in s:
+            tokens = [p.strip() for p in s.split(",")]
+        else:
+            tokens = [s]
+        out = {}
+        for tok in tokens:
+            if "=" in tok:
+                k, v = tok.split("=", 1)
+                out[k.strip()] = v.strip()
+        return out or None
+
+
+def _build_client_kwargs(api_key, base_url=None, default_query=None):
+    kwargs = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url.rstrip("/")
+    dq = default_query if default_query is not None else _parse_default_query(OPENAI_DEFAULT_QUERY)
+    if dq:
+        kwargs["default_query"] = dq
+    return kwargs
+
+
+def _make_openai_client_sync(api_key=None, base_url=None, default_query=None):
+    """Construct a synchronous OpenAI client using only api_key + base_url + default_query."""
+    key = api_key or CHATGPT_API_KEY
+    kwargs = _build_client_kwargs(key, base_url or OPENAI_BASE_URL, default_query)
+    return openai.OpenAI(**kwargs)
+
+
+def _make_openai_client_async(api_key=None, base_url=None, default_query=None):
+    """Construct an async OpenAI client using only api_key + base_url + default_query."""
+    key = api_key or CHATGPT_API_KEY
+    kwargs = _build_client_kwargs(key, base_url or OPENAI_BASE_URL, default_query)
+    return openai.AsyncOpenAI(**kwargs)
 
 def count_tokens(text, model=None):
     if not text:
@@ -28,7 +85,7 @@ def count_tokens(text, model=None):
 
 def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    client = _make_openai_client_sync(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -60,7 +117,7 @@ def ChatGPT_API_with_finish_reason(model, prompt, api_key=CHATGPT_API_KEY, chat_
 
 def ChatGPT_API(model, prompt, api_key=CHATGPT_API_KEY, chat_history=None):
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key)
+    client = _make_openai_client_sync(api_key=api_key)
     for i in range(max_retries):
         try:
             if chat_history:
@@ -91,7 +148,7 @@ async def ChatGPT_API_async(model, prompt, api_key=CHATGPT_API_KEY):
     messages = [{"role": "user", "content": prompt}]
     for i in range(max_retries):
         try:
-            async with openai.AsyncOpenAI(api_key=api_key) as client:
+            async with _make_openai_client_async(api_key=api_key) as client:
                 response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
